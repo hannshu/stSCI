@@ -15,9 +15,10 @@ Contents
 .. toctree::
 
    installation
-   section1_integration
-   section2_clustering
-   section2_annotating
-   section3_deconvolution_real
+   section1_clustering
+   section2_multi_clustering
    section3_deconvolution_sim
+   section3_deconvolution_real
+   section3_annotating
    section4_reconstruction
+   section5_integration
