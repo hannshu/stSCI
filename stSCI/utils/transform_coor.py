@@ -29,6 +29,7 @@ def cal_average_distance(
 def trans_coor(
     sc_adata: sc.AnnData, 
     st_adata: sc.AnnData,
+    multi_slice_key: Optional[str] = None,
     distance_threshold: Union[int, float] = 3,
     trans_key: str = 'trans_matrix',
     spatial_key: str = 'spatial',
@@ -36,16 +37,21 @@ def trans_coor(
 ) -> sc.AnnData:
 
     sc_adata = sc_adata.copy()
+    if (multi_slice_key is not None):
+        st_adata = st_adata.copy()
+        spatial_key_3d = f"{spatial_key}_3d"
+        st_adata.obsm[spatial_key_3d] = st_adata.obsm[spatial_key]
+        st_adata.obsm[spatial_key] = st_adata.obsm[spatial_key][:, :2]
     
+    nan_indices = []
     related_index = [np.nonzero(sim)[0] for sim in sc_adata.obsm[trans_key]]
     related_sim = [sim[index] for sim, index in zip(sc_adata.obsm[trans_key], related_index)]
     related_coor = [st_adata.obsm[spatial_key][index] for index in related_index]
 
-    if (isinstance(distance_threshold, int)):
-        distance_threshold, _ = cal_average_distance(
-            st_adata.obsm[spatial_key], n_neighbors=distance_threshold
-        )
-        print(f'>>> Set distance threshold to {distance_threshold:.3f}.')
+    distance_threshold, _ = cal_average_distance(
+        st_adata.obsm[spatial_key], n_neighbors=distance_threshold
+    )
+    print(f'>>> Set distance threshold to {distance_threshold:.3f}.')
 
     sc_coors = []
     for i in tqdm(range(len(related_sim)), desc='>>> INFO: Train SC coordination'):
@@ -53,7 +59,8 @@ def trans_coor(
         cur_sim, cur_coor = related_sim[i], related_coor[i]
 
         if (0 == cur_sim.shape[0]):
-            sc_coors.append([np.nan, np.nan])
+            nan_indices.append(i)
+            sc_coors.append([np.nan]*st_adata.obsm[spatial_key].shape[1])
             continue
         elif (1 == cur_coor.shape[0]):
             sc_coors.append(cur_coor[0])
@@ -89,6 +96,39 @@ def trans_coor(
             cur_coor = cur_coor[used_index]
 
         sc_coors.append(np.sum(cur_sim.reshape(-1, 1)*cur_coor, axis=0))
+    sc_coors = np.array(sc_coors)
 
-    sc_adata.obsm[coor_save_key] = np.array(sc_coors)
+    # Handle mismatched spot
+    if (0 != len(nan_indices)):
+
+        miss_mask = np.zeros(sc_adata.obsm['embedding'].shape[0], dtype=bool)
+        miss_mask[nan_indices] = True
+        
+        miss_embed = sc_adata.obsm['embedding'][miss_mask]
+        matched_embed = sc_adata.obsm['embedding'][~miss_mask]
+
+        # assign coordinate of the most similar spot
+        _, indices = cal_average_distance(matched_embed, miss_embed, n_neighbors=1)
+        sc_coors[nan_indices] = sc_coors[np.nonzero(~miss_mask)[0][indices].flatten()]
+
+    if (multi_slice_key is not None):
+        batch_list = np.sort(st_adata.obs[multi_slice_key].unique())
+        z_axis_list = []
+        for i in range(len(batch_list)-1):
+            slice_0_weight = st_adata[batch_list[i] == st_adata.obs[multi_slice_key]].obsm[trans_key].sum(axis=0)
+            nan_mask = ~np.isnan(slice_0_weight)
+            slice_0_weight[nan_mask] = np.random.rand(nan_mask.sum())
+            slice_0_z_axis = st_adata[batch_list[i] == st_adata.obs[multi_slice_key]].obsm[spatial_key_3d][0, 2]
+            slice_1_weight = st_adata[batch_list[i+1] == st_adata.obs[multi_slice_key]].obsm[trans_key].sum(axis=0)
+            nan_mask = ~np.isnan(slice_1_weight)
+            slice_1_weight[nan_mask] = np.random.rand(nan_mask.shape[0])
+            slice_1_z_axis = st_adata[batch_list[i+1] == st_adata.obs[multi_slice_key]].obsm[spatial_key_3d][0, 2]
+
+            overall_weight = np.vstack([slice_0_weight, slice_1_weight])
+            overall_weight /= overall_weight.sum(axis=0)
+            z_axis = overall_weight[0] * slice_0_z_axis + overall_weight[1] * slice_1_z_axis
+            z_axis_list.append(z_axis.reshape(-1, 1))
+        sc_coors = np.hstack([sc_coors, np.hstack(z_axis_list).mean(axis=1).reshape(-1, 1)])
+
+    sc_adata.obsm[coor_save_key] = sc_coors
     return sc_adata

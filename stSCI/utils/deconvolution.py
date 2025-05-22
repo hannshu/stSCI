@@ -21,6 +21,5 @@ def get_decon_result(
         index=st_adata.obs.index, 
         columns=np.unique(label_list)
     ).fillna(0).astype(int) 
-    propertion_matrix = propertion_matrix.div(propertion_matrix.sum(axis=1), axis=0).fillna(0)
 
     return propertion_matrix

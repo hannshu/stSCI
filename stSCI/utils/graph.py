@@ -41,3 +41,62 @@ def build_graph(
         'result': edge_list,
         'timer_note': f"Generate {edge_list.shape[1]} edges, {(edge_list.shape[1] / adata.shape[0]) - 1:.3f} edges per spot"
     } 
+
+
+@Timer()
+def build_graph_3d(
+    adata: Union[sc.AnnData, np.ndarray], 
+    multi_slice_key: str,
+    knears: int, 
+    cross_neigh: int,
+    use_rep: str = 'spatial'
+) -> torch.LongTensor:
+
+    overall_edge_list = []
+    slice_list = [
+        adata[slice_name == adata.obs[multi_slice_key]] 
+        for slice_name in adata.obs[multi_slice_key].unique()
+    ]
+    id_offset = 0
+
+    def gen_cross_slice_edge(
+        source_adata: sc.AnnData,
+        target_adata: sc.AnnData, 
+        mode: str
+    ) -> torch.LongTensor:
+
+        nbrs = NearestNeighbors(n_neighbors=cross_neigh).fit(target_adata.obsm[use_rep][:, :2])
+        _, indices = nbrs.kneighbors(source_adata.obsm[use_rep][:, :2])
+
+        source_indices = torch.repeat_interleave(
+            torch.arange(source_adata.shape[0]), 
+            torch.LongTensor([len(index_list) for index_list in indices])
+        )
+        target_indices = torch.Tensor([index for index_list in indices for index in index_list])
+        source_indices = source_indices + id_offset
+        if ('upper' == mode):
+            target_indices = target_indices + id_offset - target_adata.shape[0]
+        else:
+            target_indices = target_indices + id_offset + source_adata.shape[0]
+        edge_list = torch.vstack([source_indices, target_indices]).long()
+
+        return edge_list
+
+    for i in range(len(slice_list)):
+
+        # build inner slice edges
+        overall_edge_list.append(build_graph(slice_list[i], knears=knears)+id_offset)
+
+        # build cross slice edges
+        if (0 != i and len(slice_list)-1 != i):
+            overall_edge_list.append(gen_cross_slice_edge(slice_list[i], slice_list[i-1], 'upper'))  # upper
+            overall_edge_list.append(gen_cross_slice_edge(slice_list[i], slice_list[i+1], 'lower'))  # lower
+
+        id_offset += slice_list[i].shape[0]
+
+    edge_list = torch.hstack(overall_edge_list).long()
+
+    return {
+        'result': edge_list,
+        'timer_note': f"Generate {edge_list.shape[1]} multi-slice edges, {(edge_list.shape[1] / adata.shape[0]) - 1:.3f} edges per spot"
+    } 

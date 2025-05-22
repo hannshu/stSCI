@@ -1,12 +1,9 @@
 import scanpy as sc
 import numpy as np
-import pandas as pd
-from typing import Dict
-import sklearn.neighbors
-from scipy.stats import pearsonr
-from sklearn.metrics import mean_squared_error
-from .simulate import get_grid
-from .transform_coor import cal_average_distance
+from typing import List, Tuple
+from sklearn.neighbors import NearestNeighbors
+from shapely.geometry import Point
+from shapely.ops import unary_union
 
 
 # source: https://github.com/gao-lab/GLUE/blob/v0.2.2/scglue/metrics.py
@@ -50,7 +47,7 @@ def seurat_alignment_score(
         subsample_x = x[subsample_idx]
         subsample_y = y[subsample_idx]
         k = max(round(subsample_idx.size * neighbor_frac), 1)
-        nn = sklearn.neighbors.NearestNeighbors(
+        nn = NearestNeighbors(
             n_neighbors=k + 1, **kwargs
         ).fit(subsample_x)
         nni = nn.kneighbors(subsample_x, return_distance=False)
@@ -81,55 +78,42 @@ def row_argmax(x: np.ndarray) -> np.ndarray:
     return result
 
 
-def get_recon_metric(
-    sc_adata: sc.AnnData, 
-    st_adata: sc.AnnData, 
-    grid_width: float = 0.1,
-    metric: str = 'iou',
-    coor_key: str = 'spatial', 
-    cluster_key: str = 'cluster'
-) -> Dict[str, float]:
-    
-    assert (metric in ['iou', 'pcc', 'rmse']), f'>>> ERROR: {metric} not supported. ' + \
-        'Please choose from ["iou" (intersection over union), "pcc" (pearson correlation coefficient), ' + \
-        '"rmse" (root mean square error)]'
+def get_recon_iou_metric(
+    projecy_coor: np.ndarray, 
+    true_coor: np.ndarray, 
+) -> float:
 
-    sc_adata = sc_adata[pd.DataFrame(sc_adata.obsm[coor_key]).dropna().index].copy()
-    st_adata = st_adata.copy()
+    # build the ground truth region
+    nbrs = NearestNeighbors(n_neighbors=2).fit(true_coor)
+    distance, _ = nbrs.kneighbors(true_coor)
+    gt_region = unary_union([
+        Point(spot).buffer(distance[:, 1].mean()) 
+        for spot in true_coor
+    ])
 
-    sc_coor = norm_coor(sc_adata.obsm[coor_key])
-    st_coor = norm_coor(st_adata.obsm[coor_key])
+    # find true and false spots
+    point_region = unary_union([
+        Point(point).buffer(distance[:, 1].mean()) 
+        for point in projecy_coor
+    ])
 
-    xs, ys = get_grid(st_coor, grid_width)
-    canvas = np.hstack((xs.reshape(-1, 1), ys.reshape(-1, 1)))
+    inter = gt_region.intersection(point_region).area
+    union = gt_region.union(point_region).area
 
-    label_list = np.unique(st_adata.obs[cluster_key])
-    sc_pred = np.zeros((canvas.shape[0], label_list.shape[0]), dtype=int)
-    st_truth = np.zeros((canvas.shape[0], label_list.shape[0]), dtype=int)
+    return inter / union
 
-    for i, label_name in enumerate(label_list):
 
-        cur_sc_coor = sc_coor[label_name == sc_adata.obs[cluster_key]]
-        cur_st_coor = st_coor[label_name == st_adata.obs[cluster_key]]
-
-        _, sc_indices = cal_average_distance(canvas, cur_sc_coor, 1)
-        _, st_indices = cal_average_distance(canvas, cur_st_coor, 1)
-
-        for ind in np.squeeze(sc_indices):
-            sc_pred[ind][i] += 1
-        for ind in np.squeeze(st_indices):
-            st_truth[ind][i] += 1
-
-    sc_pred_label = row_argmax(sc_pred)
-    st_truth_label = row_argmax(st_truth)
-
-    mask = (-1 != sc_pred_label) & (-1 != st_truth_label)
-    sc_pred_label = sc_pred_label[mask]
-    st_truth_label = st_truth_label[mask]
-
-    if ('pcc' == metric):
-        score = pearsonr(st_truth_label, sc_pred_label)[0]
-    elif ('rmse' == metric):
-        score = np.sqrt(mean_squared_error(st_truth_label, sc_pred_label))
-
-    return score
+def get_iou_per_domain(
+    pred_sc_adata: sc.AnnData,
+    st_adata: sc.AnnData
+) -> List[Tuple[str, float]]:
+    result = []
+    for label in pred_sc_adata.obs['cluster'].unique():
+        if (0 == np.sum(label == st_adata.obs['cluster'])):
+            continue    # Reference data do not contain this domain/cell type
+        iou = get_recon_iou_metric(
+            pred_sc_adata[label == pred_sc_adata.obs['cluster']].obsm['spatial'], 
+            st_adata[label == st_adata.obs['cluster']].obsm['spatial']
+        )
+        result.append((label, iou))
+    return result

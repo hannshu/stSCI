@@ -4,11 +4,11 @@
 ![stSCI overview](./framework.png) 
 
 ## Overview 
-Spatial transcriptomics (ST) data reveals the locations of transcriptomes, offering crucial perspectives but at a compromised quality. Integrating ST data with single-cell transcriptomics (SC) data has proven to be an effective strategy for enhancing the quality of ST data, as demonstrated by previous research. We introduce stSCI (ST-SC Integration), a novel computational method that seamlessly fuses SC and ST data into a unified embedding space by incorporating a newly designed fusion module. Utilizing several simulated and real datasets, stSCI demonstrates its performance in batch correction across the two omics data, in clustering, and deconvolution of ST data, as well as in reconstructing spatial coordinates for SC data. Additionally, stSCI shows its potential for annotating ST data using only marker genes and cell types derived from SC data. Moreover, experiment result shows that stSCI performing well with both sequencing-based and imaging-based ST data, highlighting its capability as a powerful tool for comprehensive biological system analysis.
+Spatial transcriptomics (ST) preserves spatial context in gene expression analysis yet faces limitations like low resolution and RNA capture inefficiency. To address these, we present stSCI, a computational method integrating single-cell (SC) and ST data into a unified, batch-corrected embedding space. stSCI employs a fusion module with three specialized optimization tasks to generate biologically preserved joint latent representations, enabling five key analyses: spatial domain identification in single/multi-slice ST data; ST deconvolution predicting cell type proportions in low-resolution spots; SC spatial coordinate reconstruction using ST references; and cross-modality batch correction. Evaluated on 12 ST datasets spanning sequencing- and imaging-based platforms, and benchmarked against 22 state-of-the-art methods, stSCI improves spatial domain identification, maps cell type proportions in ST data, accurately reconstructs tissue architecture and regional structures, and integrates SC/ST datasets by removing batch effects without compromising biological signals. stSCI's robustness and versatility make it a powerful tool for uncovering tissue organization and molecular functions.
 
 
 ## Software dependencies
-<details open>
+<details close>
 <div>python==3.10.13</div>
 <div>numpy==1.26.4</div>  
 <div>pandas==2.2.2</div>
@@ -73,6 +73,7 @@ git submodule update
 
 ## Tutorial
 Read the [Documentation](https://stsci.readthedocs.io/en/latest/) for detailed tutorials.
+The scripts used to execute the baseline methods in this study are publicly available at [stsci_comparison](https://github.com/hannshu/stsci_comparison).
 
 
 <!-- ## Citation

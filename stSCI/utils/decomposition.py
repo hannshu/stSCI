@@ -116,16 +116,6 @@ def nonzero_softmax(matrix: torch.FloatTensor) -> torch.FloatTensor:
     return torch.sparse.softmax(matrix.to_sparse(), dim=1).to_dense()
 
 
-def get_integration_metric(adata: sc.AnnData, batch_key: str, embedding_key: str, label_key: str = None) -> None:
-
-    from harmonypy import compute_lisi
-    from scib.metrics import silhouette_batch
-
-    print(f'>>> LISI(↑): {compute_lisi(adata.obsm[embedding_key], adata.obs, [batch_key]).mean():.3f}')
-    if (label_key):
-        print(f'>>> Batch ASW(↑): {silhouette_batch(adata, batch_key=batch_key, label_key=label_key, embed=embedding_key):.3f}')
-
-
 def get_cell_type_centroids(sc_adata: sc.AnnData, cluster_key: str, use_rep: Optional[str] = None) -> Tuple[torch.Tensor, np.ndarray]:
 
     if (use_rep):
@@ -134,7 +124,7 @@ def get_cell_type_centroids(sc_adata: sc.AnnData, cluster_key: str, use_rep: Opt
         features = get_feature(sc_adata)
     cluster_centroid = []
 
-    for cell_type in np.unique(sc_adata.obs[cluster_key].astype(str)):
+    for cell_type in np.unique(sc_adata.obs[cluster_key]):
 
         mask = cell_type == sc_adata.obs[cluster_key]
         cluster_centroid.append(np.mean(features[mask], axis=0))

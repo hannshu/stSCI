@@ -74,6 +74,7 @@ def plot_deconvolution(
             ), 
             color=show_keys, 
             spot_size=spot_size,
+            cmap='Blues',
             save=f'ground_truth_{save_path}' if (save_path) else None
         )
 
@@ -152,3 +153,27 @@ def plot_roc_curve(truth_list: List[list], pred_list: List[list], class_name: Li
     plt.title('ROC curve')
     plt.legend()
     plt.show()
+
+
+# set the palette for each label
+def get_palette(label_list, opacity=1.0, use_cmap_func=None):
+    palette = {}
+    max_label = np.array(list(label_list)).shape[0]
+    map_label_id = {id: label_name for id, label_name in enumerate(list(label_list))}
+    
+    # set cmp function
+    import matplotlib
+    if (not isinstance(use_cmap_func, matplotlib.colors.Colormap)):
+        if (max_label <= 10):
+            use_cmap_func = plt.cm.tab10
+        elif (max_label <= 20):
+            use_cmap_func = plt.cm.tab20
+        else:
+            use_cmap_func = plt.cm.gist_ncar
+    assert(max_label <= use_cmap_func.N), '>>> ERROR: The cmp function has fewer colors than the label count'
+
+    for label_id in range(max_label):
+        color = use_cmap_func(int(label_id) / (max_label + 1))
+        palette[map_label_id[label_id]] = (color[0], color[1], color[2], opacity)
+
+    return palette

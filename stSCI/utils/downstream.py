@@ -3,12 +3,10 @@ import scanpy as sc
 import pandas as pd
 import numpy as np
 from sklearn.decomposition import PCA
-from typing import Tuple, List, Union
-from scipy.stats import pearsonr
-from . import get_feature
+from typing import Tuple, List, Union, Optional
 from .decomposition import get_mnn_matrix, nonzero_softmax
 from .deconvolution import get_decon_result
-from .transform_coor import trans_coor
+from .transform_coor import trans_coor, impute_st
 
 
 # source: https://github.com/QIFEIDKN/STAGATE/blob/main/STAGATE/utils.py
@@ -40,30 +38,34 @@ def downstream_analysis(
     model: torch.nn.Module,
     overall_sim_k: int, 
     label_name: np.ndarray,
-    clustering: bool = True,
-    cluster_method: str = 'mclust',
-    deconvolution: bool = True,
+    clustering: bool = False,
+    cluster_method: str = 'louvain',
+    cluster_para: Union[int, float] = 0.8,
+    deconvolution: bool = False,
     cluster_key: str = 'cluster',
-    coor_reconstruction: bool = True,
+    coor_reconstruction: bool = False,
+    multi_slice_key: Optional[str] = None,
+    imputation: bool = False
 ) -> Tuple[sc.AnnData]:
 
     sc_adata = sc_adata.copy()
     st_adata = st_adata.copy()
 
-    # clustering
+    # do clustering
     if (clustering):
         st_adata.obsm['recon_pca'] = PCA(n_components=30, random_state=0).fit_transform(st_adata.obsm['recon'])
-        if ('mclust' == cluster_method and 'cluster' in st_adata.obs):
-            st_adata.obs['cluster_result'] = mclust_R(
-                st_adata, 
-                len(np.unique(st_adata['nan' != st_adata.obs['cluster'], :].obs['cluster'])), 
-                used_obsm='recon_pca'
-            )
+        if ('mclust' == cluster_method):
+            assert ('cluster' in st_adata.obs or isinstance(cluster_para, int)), \
+                '>>> ERROR: mclust need cluster number as input'
+            if ('cluster' in st_adata.obs):
+                cluster_para = len(np.unique(st_adata['nan' != st_adata.obs['cluster'], :].obs['cluster']))
+            st_adata.obs['cluster_result'] = mclust_R(st_adata, cluster_para, used_obsm='recon_pca')
         else:
             sc.pp.neighbors(st_adata, use_rep='recon_pca')
-            sc.tl.louvain(st_adata, resolution=0.8, key_added='cluster_result')
+            sc.tl.louvain(st_adata, resolution=cluster_para, key_added='cluster_result')
 
-    if (deconvolution or coor_reconstruction):
+    # do deconvolution
+    if (deconvolution or coor_reconstruction or imputation):
         
         # get transfer matrix
         trans_matrix = get_mnn_matrix(torch.FloatTensor(sc_adata.obsm['embedding']), 
@@ -80,64 +82,14 @@ def downstream_analysis(
                 (decon_result + deconv_prop[label_name].to_numpy()) / 2,
                 index=st_adata.obs.index, columns=label_name
             )
+            st_adata.obsm['decon_result'] = st_adata.obsm['decon_result'].div(st_adata.obsm['decon_result'].sum(axis=1), axis=0).fillna(0)
 
-        # coor reconstruction
-        if (coor_reconstruction):
-            sc_adata = trans_coor(sc_adata, st_adata)
+    # coor reconstruction
+    if (coor_reconstruction or imputation):
+        sc_adata = trans_coor(sc_adata, st_adata, multi_slice_key)
+
+    # do imputation
+    if (imputation):
+        st_adata = impute_st(sc_adata, st_adata, sc_label_key=cluster_key)
 
     return sc_adata, st_adata
-
-
-def find_BCD(
-    adata: sc.AnnData, 
-    ref_gene: str, 
-    cluster_key: str = 'cluster_result',
-    **visual_kwargs
-) -> Union[List, float]:
-
-    # init ref list
-    gene_epx = get_feature(adata[:, ref_gene]).reshape(-1)
-    ref_list = np.zeros((gene_epx.shape))
-    ref_list[gene_epx >= np.quantile(gene_epx, 0.75)] = 1
-
-    # find BCD
-    label_list, correlation_score = _find_BCD(adata.obs[cluster_key].to_numpy(), ref_list)
-
-    # visualize
-    sc.pl.spatial(adata, color=[ref_gene, cluster_key], groups=label_list, title=[f'Reference gene {ref_gene}', 'Cluster set'], cmap='Blues', **visual_kwargs)
-
-    return label_list, correlation_score
-
-
-# find the best correlated domain
-def _find_BCD(
-    label_list: List, 
-    ref_list: List, 
-    cur_label_list: List = [], 
-    cur_max_score: float = 0
-) -> Union[List, float]:
-    
-    # init, filter label
-    label = np.unique(label_list)[[
-        l not in cur_label_list for l in np.unique(label_list)
-    ]]
-    max_score = 0
-    max_label_list = None
-
-    # find better correlated label list
-    for l in label:
-
-        used_label = cur_label_list + [l]
-
-        dist = np.zeros(len(label_list))
-        dist[[l in used_label for l in label_list]] = 1
-        cur_score = pearsonr(dist, ref_list)[0]
-
-        if (cur_score > max_score):
-            max_score = cur_score
-            max_label_list = used_label
-
-    if (max_label_list and max_score >= cur_max_score):
-        return _find_BCD(label_list, ref_list, max_label_list, max_score)
-    else:
-        return cur_label_list, cur_max_score

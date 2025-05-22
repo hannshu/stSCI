@@ -11,7 +11,7 @@ from .utils import (
     get_feature, 
     get_overlap_gene
 )
-from .utils.graph import build_graph
+from .utils.graph import build_graph, build_graph_3d
 from .utils.decomposition import (
     dual_pca, 
     get_mnn_matrix, 
@@ -25,6 +25,7 @@ from .utils.downstream import downstream_analysis
 def train(
     sc_adata: sc.AnnData,
     st_adata: sc.AnnData,
+    multi_slice_key: Optional[str] = None,
     hvg_count: int = 3000,
     batch_sim_k: int = 25,
     overall_sim_k: int = 100,
@@ -36,8 +37,10 @@ def train(
     model_dims: List[int] = [512, 30],
     clustering: bool = False,
     cluster_method: str = 'mclust',
+    cluster_para: Union[int, float] = 0.8,
     deconvolution: bool = False,
     coor_reconstruction: bool = False,
+    imputation: bool = False,
     model_save_path: Optional[str] = None,
     device: str = 'cuda' if (torch.cuda.is_available()) else 'cpu'
 ) -> Tuple[sc.AnnData]:
@@ -57,10 +60,16 @@ def train(
     cell_type_centroids = cell_type_centroids.to(device)
     sc_data = torch.FloatTensor(get_feature(sc_result)).to(device)
 
-    st_data = Data(
-        x=torch.FloatTensor(get_feature(st_result)), 
-        edge_index=build_graph(st_adata, knears=6)
-    ).to(device)
+    if (multi_slice_key):
+        st_data = Data(
+            x=torch.FloatTensor(get_feature(st_result)), 
+            edge_index=build_graph_3d(st_adata, multi_slice_key, knears=6, cross_neigh=3)
+        ).to(device)
+    else:
+        st_data = Data(
+            x=torch.FloatTensor(get_feature(st_result)), 
+            edge_index=build_graph(st_adata, knears=6)
+        ).to(device)
 
     # reshuffle sc data and generate batch mnn pairs
     reshuffled_sc_data = sc_data[np.random.randint(sc_data.shape[0], size=sc_data.shape[0])]
@@ -146,8 +155,8 @@ def train(
     st_adata.obsm['recon'] = recon[1].detach().cpu().numpy()
 
     return downstream_analysis(sc_adata, st_adata, eval_model, overall_sim_k, 
-                               label_name, clustering, cluster_method, 
-                               deconvolution, cluster_key, coor_reconstruction)
+                               label_name, clustering, cluster_method, cluster_para, 
+                               deconvolution, cluster_key, coor_reconstruction, multi_slice_key, imputation)
 
 
 @Timer(note='Inference stSCI model')
@@ -155,13 +164,16 @@ def eval(
     sc_adata: sc.AnnData,
     st_adata: sc.AnnData,
     model_path: Union[torch.nn.Module, str],
+    multi_slice_key: Optional[str] = None,
     hvg_count: int = 3000,
     overall_sim_k: int = 100,
     cluster_key: str = 'cluster',
     clustering: bool = False,
     cluster_method: str = 'mclust',
+    cluster_para: Union[int, float] = 0.8,
     deconvolution: bool = False,
     coor_reconstruction: bool = False,
+    imputation: bool = False
 ) -> Tuple[sc.AnnData]:
 
     sc_adata = sc_adata.copy()
@@ -170,10 +182,16 @@ def eval(
     # perpare input data
     sc_result, st_result = get_overlap_gene([sc_adata, st_adata], top_genes=hvg_count)
     sc_data = torch.FloatTensor(get_feature(sc_result))
-    st_data = Data(
-        x=torch.FloatTensor(get_feature(st_result)), 
-        edge_index=build_graph(st_adata, knears=6)
-    )
+    if (multi_slice_key):
+        st_data = Data(
+            x=torch.FloatTensor(get_feature(st_result)), 
+            edge_index=build_graph_3d(st_adata, multi_slice_key, knears=6, cross_neigh=3)
+        )
+    else:
+        st_data = Data(
+            x=torch.FloatTensor(get_feature(st_result)), 
+            edge_index=build_graph(st_adata, knears=6)
+        )
     label_name = np.unique(sc_adata.obs[cluster_key])
 
     # generate embedding
@@ -191,5 +209,5 @@ def eval(
     st_adata.obsm['recon'] = recon[1].detach().cpu().numpy()
 
     return downstream_analysis(sc_adata, st_adata, model, overall_sim_k, 
-                               label_name, clustering, cluster_method, 
-                               deconvolution, cluster_key, coor_reconstruction)
+                               label_name, clustering, cluster_method, cluster_para, 
+                               deconvolution, cluster_key, coor_reconstruction, multi_slice_key, imputation)
