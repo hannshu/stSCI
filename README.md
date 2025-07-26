@@ -66,13 +66,17 @@ git submodule init
 git submodule update
 ```
 
-3. Build the Anaconda environment, the package version of the essential dependencies noted at [Software dependencies](#Software-dependencies) section.
+3. Build the Anaconda environment, the package version of the essential dependencies noted at [Software dependencies](#Software-dependencies) section. Or use the `environment.yml` to directly build the conda environment.
+
+``` bash
+conda env create -f environment.yml
+```
 
 4. Write a python script to run stSCI
 
 
 ## Tutorial
-Read the [Documentation](https://stsci.readthedocs.io/en/latest/) for detailed tutorials.
+Read the [Documentation](https://stsci.readthedocs.io/en/latest/) for detailed tutorials.  
 The scripts used to execute the baseline methods in this study are publicly available at [stsci_comparison](https://github.com/hannshu/stsci_comparison).
 
 
