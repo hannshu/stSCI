@@ -15,6 +15,7 @@ Contents
 .. toctree::
 
    installation
+   parameter
    section1_clustering
    section2_multi_clustering
    section3_deconvolution_sim
